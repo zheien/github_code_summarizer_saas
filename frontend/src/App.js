@@ -27,11 +27,15 @@ import {
   Divider,
   ToggleButton,
   ToggleButtonGroup,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import CodeIcon from '@mui/icons-material/Code';
 import GitHubIcon from '@mui/icons-material/GitHub';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 
 function App() {
   const [mode, setMode] = useState('code'); // 'code' or 'repo'
@@ -125,25 +129,29 @@ function App() {
       setFileContent(response.data);
       setCodeBlock('');
       setSelectedFile(file);
-      
+
       // Generate summary for the selected file
       const summaryResponse = await axios.post('http://localhost:5001/summarize-code', {
         owner: selectedRepo.owner.login,
         repo: selectedRepo.name,
-        filePath: file.path
+        filePath: file.path,
       });
-      
+
       if (summaryResponse && summaryResponse.data) {
         setCodeSummary({
           overview: summaryResponse.data.overview,
           keyComponents: summaryResponse.data.keyComponents,
-          technicalDetails: summaryResponse.data.technicalDetails
+          technicalDetails: summaryResponse.data.technicalDetails,
         });
       } else {
         throw new Error('Invalid response from server');
       }
     } catch (error) {
-      setError('Failed to fetch file content or generate summary. Please try again.');
+      if (error.response?.data?.error?.includes('empty or its content could not be retrieved')) {
+        setError('The selected file is empty or its content could not be retrieved.');
+      } else {
+        setError('Failed to fetch file content or generate summary. Please try again.');
+      }
       console.error('File content error:', error);
     } finally {
       setLoading(false);
@@ -180,11 +188,104 @@ function App() {
     }
   };
 
+  const handleSummarizeAll = async () => {
+    if (!selectedRepo) {
+      setError('Please select a repository to summarize all files');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    try {
+      const response = await axios.post('http://localhost:5001/summarize-code', {
+        owner: selectedRepo.owner.login,
+        repo: selectedRepo.name,
+        summarizeAll: true,
+      });
+
+      if (response && response.data) {
+        setCodeSummary({
+          overview: response.data.overview,
+          keyComponents: response.data.keyComponents,
+          technicalDetails: response.data.technicalDetails,
+        });
+      } else {
+        throw new Error('Invalid response from server');
+      }
+    } catch (error) {
+      if (error.response?.data?.error?.includes('empty or its content could not be retrieved')) {
+        setError('One or more files in the repository are empty or their content could not be retrieved. These files were skipped.');
+      } else {
+        setError('Failed to summarize all files. Please try again.');
+      }
+      console.error('Summarize all error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleFilterChange = (filterName, value) => {
     setFilters(prev => ({
       ...prev,
       [filterName]: value
     }));
+  };
+
+  const formatSummary = (summary) => {
+    const formatText = (text) => {
+      return text
+        .replace(/\*\*(.*?)\*\*/g, (_, text) => `\n\n${text.toUpperCase()}\n`) // Convert **bold** to uppercase headings
+        .replace(/\*(.*?)\*/g, (_, text) => `- ${text}`) // Convert *bullet points* to proper bullet points
+        .replace(/## (.*?)\n/g, (_, text) => `\n\n${text.toUpperCase()}\n`) // Convert ## headings to uppercase
+        .replace(/# (.*?)\n/g, (_, text) => `\n\n${text.toUpperCase()}\n`); // Convert # headings to uppercase
+    };
+
+    return (
+      <Box sx={{ maxHeight: '400px', overflow: 'auto', p: 2 }}>
+        <Accordion>
+          <AccordionSummary
+            expandIcon={<ExpandMoreIcon />}
+            aria-controls="overview-content"
+            id="overview-header"
+          >
+            <Typography variant="subtitle1">Overview</Typography>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Typography paragraph sx={{ whiteSpace: 'pre-line', lineHeight: 1.6 }}>
+              {formatText(summary.overview)}
+            </Typography>
+          </AccordionDetails>
+        </Accordion>
+        <Accordion>
+          <AccordionSummary
+            expandIcon={<ExpandMoreIcon />}
+            aria-controls="key-components-content"
+            id="key-components-header"
+          >
+            <Typography variant="subtitle1">Key Components</Typography>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Typography paragraph sx={{ whiteSpace: 'pre-line', lineHeight: 1.6 }}>
+              {formatText(summary.keyComponents)}
+            </Typography>
+          </AccordionDetails>
+        </Accordion>
+        <Accordion>
+          <AccordionSummary
+            expandIcon={<ExpandMoreIcon />}
+            aria-controls="technical-details-content"
+            id="technical-details-header"
+          >
+            <Typography variant="subtitle1">Technical Details</Typography>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Typography paragraph sx={{ whiteSpace: 'pre-line', lineHeight: 1.6 }}>
+              {formatText(summary.technicalDetails)}
+            </Typography>
+          </AccordionDetails>
+        </Accordion>
+      </Box>
+    );
   };
 
   return (
@@ -491,6 +592,18 @@ function App() {
                       />
                     </Box>
                   )}
+
+                  {mode === 'repo' && selectedRepo && (
+                    <Button
+                      variant="contained"
+                      color="secondary"
+                      onClick={handleSummarizeAll}
+                      disabled={loading}
+                      sx={{ mt: 2 }}
+                    >
+                      {loading ? <CircularProgress size={24} /> : 'Summarize All Files'}
+                    </Button>
+                  )}
                 </>
               )}
               {error && (
@@ -514,28 +627,7 @@ function App() {
               ) : error ? (
                 <Alert severity="error">{error}</Alert>
               ) : codeSummary ? (
-                  <Box>
-                  <Typography variant="subtitle1" gutterBottom>
-                      Overview
-                    </Typography>
-                  <Typography paragraph>
-                      {codeSummary.overview}
-                    </Typography>
-                  <Divider sx={{ my: 2 }} />
-                  <Typography variant="subtitle1" gutterBottom>
-                      Key Components
-                    </Typography>
-                  <Typography paragraph>
-                      {codeSummary.keyComponents}
-                    </Typography>
-                  <Divider sx={{ my: 2 }} />
-                  <Typography variant="subtitle1" gutterBottom>
-                      Technical Details
-                    </Typography>
-                  <Typography paragraph>
-                      {codeSummary.technicalDetails}
-                    </Typography>
-                </Box>
+                formatSummary(codeSummary)
               ) : (
                 <Typography color="text.secondary">
                   {mode === 'code' 
